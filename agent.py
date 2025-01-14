@@ -6,8 +6,8 @@ import time
 import json
 import sys 
 # Constants
-TCP_PORT = 5005
-UDP_PORT = 5001
+TCP_PORT = 5007
+# UDP_PORT = 5001
 BUFFER_SIZE = 1024
 
 def get_system_status():
@@ -29,14 +29,15 @@ def restart_system():
     os.system("shutdown /r /t 1")
 
 class Agent:
-    def __init__(self , IP , tcp_port , udp_port) -> None:
+    def __init__(self , IP , tcp_port ) -> None:
         # Create a socket object
         self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_socket.bind((IP, tcp_port))
         self.tcp_socket.listen(1)
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) 
-        self.udp_port = udp_port
+        self.udp_port = None
+        self.server_ip = None
 
         print(f'[+] Waiting for incoming connections on {IP}:{tcp_port}')
 
@@ -50,9 +51,9 @@ class Agent:
         while True:
             try:
                 part = self.connection.recv(1024).decode('utf-8')
-                if not part:  # If the connection is lost, remove it
-                    self.remove_connection(self.active_session_index)
-                    return None
+                # if not part:  # If the connection is lost, remove it
+                #     self.remove_connection(self.active_session_index)
+                #     return None
                 json_data += part
                 return json.loads(json_data)  
             except ValueError:
@@ -62,12 +63,13 @@ class Agent:
         """Send critical events to the central manager via UDP."""
         # udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         while True:
-            cpu_usage = psutil.cpu_percent(interval=1)
-            if cpu_usage > 1:  # Example threshold for high CPU usage
-                message = f"CRITICAL: CPU usage is {cpu_usage}%"
-                print(f'sending {message}')
-                self.udp_socket.sendto(message.encode(), ("127.0.0.1", self.udp_port))
-            time.sleep(5)  # Check every 5 seconds
+            if self.udp_port:
+                cpu_usage = psutil.cpu_percent(interval=1)
+                if cpu_usage > 1:  # Example threshold for high CPU usage
+                    message = f"CRITICAL: CPU usage is {cpu_usage}%"
+                    print(f'sending {message}')
+                    self.udp_socket.sendto(message.encode(), (self.server_ip, self.udp_port))
+                time.sleep(5)  # Check every 5 seconds
 
     def tcp_handler(self):
         # prersian = subprocess.call('chcp 65001', shell=True)
@@ -82,8 +84,13 @@ class Agent:
             
             command = self.reliable_receive()
             try:
-                print(f'>> {command[0]} ',end='')
-                if command[0] == 'exit':
+                print(f'>> {command} ',end='')
+                if command[0] == 'inf':
+                    self.server_ip = command[1]
+                    self.udp_port = command[2]
+                    continue
+                
+                elif command[0] == 'exit':
                     self.reliable_send('exited')
                     self.tcp_socket.close()
                     sys.exit()
@@ -129,7 +136,7 @@ class Agent:
 
 
 if __name__ == "__main__":
-    agent = Agent("0.0.0.0" , TCP_PORT , UDP_PORT)
+    agent = Agent("0.0.0.0" , TCP_PORT)
     agent.start()
 
 
