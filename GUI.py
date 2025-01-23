@@ -269,6 +269,7 @@ class LogMonitorApp:
                             cpu_match = re.search(r"CPU usage is (\d+\.\d+)%", message)
                             cpu_percent = float(cpu_match.group(1)) if cpu_match else None
                             self.add_log(ip, timestamp, message, cpu_percent, port)
+
             time.sleep(1)
 
     def add_log(self, ip, timestamp, message, cpu_percent, port):

@@ -7,7 +7,7 @@ from datetime import datetime
 from GUI import *
 # Constants
 TCP_PORT = 5007
-UDP_PORT = 5045
+UDP_PORT = 50161
 BUFFER_SIZE = 1024
 LOG_FILE = "udp_alerts.log"
 
@@ -18,6 +18,7 @@ class Client:
     def __init__(self , IP , PORT) -> None:
         self.addresse = (IP ,PORT)
         self.connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
+        self.connection.settimeout(4)
         self.connection.connect((IP , PORT))
         self.commands = {}
 
@@ -29,8 +30,8 @@ class Server:
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.ip = IP
         self.udp_port = UDP_PORT
-        self.udp_socket.bind((IP, UDP_PORT))
-        print(f"[+] Listening for UDP alerts on {IP}:{UDP_PORT}")
+        self.udp_socket.bind(('0.0.0.0', UDP_PORT)) # ip = 0.0.0.0
+        print(f"[+] Listening for UDP alerts on 0.0.0.0:{UDP_PORT}")
         self.clients = []
         self.connections = []  # Store connections
         self.addresses = []     # Store client addresses
@@ -45,43 +46,59 @@ class Server:
         )
 
 
-    def connect_to_clients(self , port):  
-        try:
-            with open(AGENT_FILE, "r") as file:
-                agent_ips = [line.strip() for line in file.readlines() if line.strip()]
-        except FileNotFoundError:
-            print(f"Agent file '{AGENT_FILE}' not found. Please create it with agent IPs.")
-            return
+    def connect_to_clients(self , port , IP=None):  
         
-        for ip in agent_ips:  
-            try:  
-                client = Client(ip , port)
+        if not IP:
+            try:
+                with open(AGENT_FILE, "r") as file:
+                    agent_ips = [line.strip() for line in file.readlines() if line.strip()]
+            except FileNotFoundError:
+                print(f"Agent file '{AGENT_FILE}' not found. Please create it with agent IPs.")
+                return
+            
+            print(agent_ips)
+            for ip in agent_ips:  
+                try:  
+                    client = Client(ip , port)
+                    self.clients.append(client)
+                    self.connection = client.connection
+                    self.reliable_send(['inf',self.ip , self.udp_port])
+                    
+                    print(f"Connected to client at {ip}:{port}")  
+                except Exception as e:  
+                    print(f"Failed to connect to {ip}:{port} - {e}")
+            self.select_session(0) 
+
+        else:
+            try:
+                client = Client(IP , port)
                 self.clients.append(client)
-                # client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
-                # client_socket.connect((ip, port))  
-                # self.connections.append(client_socket)  
-                # self.addresses.append((ip, port))
-                self.connection = client.connection
                 self.reliable_send(['inf',self.ip , self.udp_port])
-                
                 print(f"Connected to client at {ip}:{port}")  
             except Exception as e:  
                 print(f"Failed to connect to {ip}:{port} - {e}") 
 
-        self.select_session(0)
+            self.select_session(len(self.clients)-1)
+        
 
     def select_session(self , session=1):
         try:
+            i = 0
             print("\n[+] Available sessions:")
             for client in self.clients:
-                print(f'{client.addresse[0]} - {client.addresse[1]}')
-            if session != 0:
-                choice = int(input("[+] Choose a session to interact with (by number): "))
+                print(f'{i} - {client.addresse[0]} - {client.addresse[1]}')
+                i += 1
+            if i>0 :
+                
+                if session != 0:
+                    choice = int(input("[+] Choose a session to interact with (by number): "))
+                else:
+                    choice = 0
+                self.connection = self.clients[choice].connection
+                self.active_session_index = choice
+                print(f"[+] You are now interacting with {self.clients[choice].addresse}")
             else:
-                choice = 0
-            self.connection = self.clients[choice].connection
-            self.active_session_index = choice
-            print(f"[+] You are now interacting with {self.clients[choice].addresse}")
+                print('[-] there is no session')
         except:
             print('[-] there is no session')
     def reliable_send(self, data: str):  
@@ -126,31 +143,51 @@ class Server:
 
             
     def remove_connection(self, index):
-        print(f"[-] Connection to {self.clients[index].addresse} was lost.")
-        del self.clients[index].connection
-        del self.clients[index].addresse
-        self.active_session_index = None
-        if self.clients:
-            self.select_session()
-        else:
-            print("[-] No active sessions available.")
+        # print(f"[-] Connection to {self.clients[index].addresse} was lost.")
+        del self.clients[index]
+        if self.active_session_index == index:
+            self.active_session_index = None
+            if self.clients:
+                self.select_session()
+            else:
+                print("[-] No active sessions available.")
+
+
+    def check_connections(self):
+        while True:
+            for agent in self.clients:
+                try:
+                    agent.connection.getpeername()
+                except:
+                    log = f"\n[-] connection to {agent.addresse} was lost\n>> "
+                    print(log)
+                    
+                    self.remove_connection(self.clients.index(agent))
+        
+            time.sleep(10)
 
     def handle_agent_commands(self):  
         # print("[+] Waiting for a new connection or active session...")
         
         while True:  
-            if self.active_session_index is None:
-                continue
             # if self.active_session_index is None:
             #     continue
+
+
             command = input('>> ')  
             command = command.split(" ")
-            if command[0] == "list":
-                self.select_session()
-                continue
             
             try:
-                if command[0] == "1":
+                if command[0] == "list":
+                    self.select_session()
+                    continue
+                elif command[0]== 'reconnect':
+                    if command[1] == '-a' or command[1]=='--all':
+                        self.connect_to_clients(port=TCP_PORT)
+                    if command[1]:
+                        self.connect_to_clients(port=TCP_PORT , IP=command[1])
+
+                elif command[0] == "1":
                     command = ['1']#["GET_STATUS"]
 
                 elif command[0] == "2":
@@ -172,7 +209,7 @@ class Server:
                 if result is None:  # Connection was lost, select a new session
                     continue
 
-                if command[0] == 'exit':
+                if command[0] == 'close':
                     print(result)
                     self.connection.close()
                     self.remove_connection(self.active_session_index)
@@ -193,12 +230,8 @@ class Server:
         udp_connection_thread = threading.Thread(target=self.handle_udp_alerts).start()
         self.connect_to_clients(port=TCP_PORT)
         connection_thread = threading.Thread(target=self.handle_agent_commands).start()
-
-        # connection_thread.daemon = True
-        # connection_thread.start()
+        check_connections = threading.Thread(target=self.check_connections).start()
         
-        # self.handle_agent_commands()
-
 
 
 def main():
