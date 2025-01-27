@@ -4,21 +4,23 @@ import time
 import json
 import logging
 from datetime import datetime
+import base64
 from GUI import *
-# Constants
-TCP_PORT = 5007
-UDP_PORT = 50161
+
+
+TCP_PORT = 5008
+UDP_PORT = 50162
 BUFFER_SIZE = 1024
 LOG_FILE = "udp_alerts.log"
 
-# Load agent IPs from a file
+
 AGENT_FILE = "agents.txt"
 
 class Client:
     def __init__(self , IP , PORT) -> None:
         self.addresse = (IP ,PORT)
         self.connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
-        self.connection.settimeout(4)
+        self.connection.settimeout(3)
         self.connection.connect((IP , PORT))
         self.commands = {}
 
@@ -30,14 +32,12 @@ class Server:
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.ip = IP
         self.udp_port = UDP_PORT
-        self.udp_socket.bind(('0.0.0.0', UDP_PORT)) # ip = 0.0.0.0
+        self.udp_socket.bind(('0.0.0.0', UDP_PORT)) 
         print(f"[+] Listening for UDP alerts on 0.0.0.0:{UDP_PORT}")
         self.clients = []
-        self.connections = []  # Store connections
-        self.addresses = []     # Store client addresses
         self.active_session_index = None
 
-         # Configure logging
+
         logging.basicConfig(
             filename="udp_alerts.log",
             level=logging.INFO,
@@ -55,14 +55,17 @@ class Server:
             except FileNotFoundError:
                 print(f"Agent file '{AGENT_FILE}' not found. Please create it with agent IPs.")
                 return
+            except Exception as e:
+                print(f"An error occurred while reading the agent file: {e}")
+                return
             
             print(agent_ips)
             for ip in agent_ips:  
                 try:  
-                    client = Client(ip , port)
+                    client = Client(ip, port)
                     self.clients.append(client)
                     self.connection = client.connection
-                    self.reliable_send(['inf',self.ip , self.udp_port])
+                    self.reliable_send(['inf', self.ip, self.udp_port])
                     
                     print(f"Connected to client at {ip}:{port}")  
                 except Exception as e:  
@@ -71,12 +74,12 @@ class Server:
 
         else:
             try:
-                client = Client(IP , port)
+                client = Client(IP, port)
                 self.clients.append(client)
-                self.reliable_send(['inf',self.ip , self.udp_port])
-                print(f"Connected to client at {ip}:{port}")  
+                self.reliable_send(['inf', self.ip, self.udp_port])
+                print(f"Connected to client at {IP}:{port}")  
             except Exception as e:  
-                print(f"Failed to connect to {ip}:{port} - {e}") 
+                print(f"Failed to connect to {IP}:{port} - {e}") 
 
             self.select_session(len(self.clients)-1)
         
@@ -132,18 +135,14 @@ class Server:
             return base64.b64encode(file.read()).decode('utf-8')
     
     def handle_udp_alerts(self):
-        """Handle incoming UDP alerts from agents."""
         while True:
             message, addr = self.udp_socket.recvfrom(BUFFER_SIZE)
             decoded_message = message.decode()
-
-            log_entry = f"Alert from {addr}: {decoded_message}"
-            # print(log_entry)
+            log_entry = f"Alert from  {decoded_message}" #{addr}:
             logging.info(log_entry)
 
             
     def remove_connection(self, index):
-        # print(f"[-] Connection to {self.clients[index].addresse} was lost.")
         del self.clients[index]
         if self.active_session_index == index:
             self.active_session_index = None
@@ -167,13 +166,8 @@ class Server:
             time.sleep(10)
 
     def handle_agent_commands(self):  
-        # print("[+] Waiting for a new connection or active session...")
         
         while True:  
-            # if self.active_session_index is None:
-            #     continue
-
-
             command = input('>> ')  
             command = command.split(" ")
             
@@ -186,30 +180,28 @@ class Server:
                         self.connect_to_clients(port=TCP_PORT)
                     if command[1]:
                         self.connect_to_clients(port=TCP_PORT , IP=command[1])
+                    continue
+                elif command[0] == "status":
+                    command = ['1']
 
-                elif command[0] == "1":
-                    command = ['1']#["GET_STATUS"]
+                elif command[0] == "process":
+                    command = ["2"]
 
-                elif command[0] == "2":
-                    command = ["GET_PROCESS_COUNT"]
-
-                elif command[0] == "3":
-                    command = ["RESTART"]
-
-                elif command[0] == "4":
-                    print("Disconnecting from agent...")
-                    break
+                elif command[0] == "restart":
+                    command = ["3"]
 
                 elif command[0] == 'upload':
                     file_content = self.read_file(command[1])
                     command.append(file_content)
-                    
+
+                
+
                 result = self.execute_remotely(command)
                 
                 if result is None:  # Connection was lost, select a new session
                     continue
-
-                if command[0] == 'close':
+                
+                elif command[0] == 'close':
                     print(result)
                     self.connection.close()
                     self.remove_connection(self.active_session_index)
@@ -235,8 +227,7 @@ class Server:
 
 
 def main():
-    """Main function to manage agents and handle alerts."""
-    server = Server('172.27.76.76' , UDP_PORT)
+    server = Server('192.168.31.1' , UDP_PORT)
     server.start()
     
     root = tk.Tk()
