@@ -13,7 +13,7 @@ import base64
 import signal
 
 
-TCP_PORT = 5008
+TCP_PORT = 5010
 BUFFER_SIZE = 1024
 
 # Shared flag to signal threads to stop
@@ -26,9 +26,9 @@ def get_ip_address():
         try:
             result = subprocess.run(["hostname", "-I"], capture_output=True, text=True, check=True)
             ip_address = result.stdout.strip().split()[0]
-            return ip_address
+            return ip_address , system
         except Exception as e:
-            return f"Unable to get IP address on Linux: {e}"
+            print(f"Unable to get IP address on Linux: {e}")
     
     elif system == "windows":
         # Use the 'ipconfig' command to get the IP address on Windows
@@ -39,12 +39,12 @@ def get_ip_address():
             for line in output.splitlines():
                 if "IPv4 Address" in line:
                     ip_address = line.split(":")[1].strip()
-                    return ip_address
-            return "No IPv4 address found in ipconfig output."
+                    return ip_address , system
+            print("No IPv4 address found in ipconfig output.")
         except Exception as e:
-            return f"Unable to get IP address on Windows: {e}"
+            print(f"Unable to get IP address on Windows: {e}")
     else:
-        return f"Unsupported operating system: {system}"
+        print(f"Unsupported operating system: {system}")
 
 def get_system_status():
     cpu_usage = psutil.cpu_percent(interval=1)
@@ -58,15 +58,19 @@ def get_system_status():
 def get_running_process_count():
     return len(psutil.pids())
 
-def restart_system():
-    os.system("shutdown /r /t 1")
+def restart_system(password , system):
+    if system == 'linux':
+        os.system(f"echo {password} | sudo -S init 6")
+    else:
+        command = 'shutdown /r /t 0'
+        os.system( command , shell=True)
 
 class Agent:
     def __init__(self, IP, tcp_port):
         self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_socket.bind((IP, tcp_port))
         self.tcp_socket.listen(1)
-        self.actuall_ip= get_ip_address()
+        self.actuall_ip , self.system = get_ip_address()
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_port = None
         self.server_ip = None
@@ -92,8 +96,8 @@ class Agent:
             if self.udp_port:
                 cpu_usage = psutil.cpu_percent(interval=1)
                 if cpu_usage > 0.5:  # Example threshold for high CPU usage
-                    address = self.udp_socket.getsockname()
-                    message = f"{(self.actuall_ip,address[1])} : CRITICAL: CPU usage is {cpu_usage}%"
+                    # address = self.udp_socket.getsockname()
+                    message = f"{(self.actuall_ip,self.udp_port)} : CRITICAL: CPU usage is {cpu_usage}%"
                     print(f'sending : CRITICAL: CPU usage is {cpu_usage}%')
                     self.udp_socket.sendto(message.encode(), (self.server_ip, self.udp_port))
             time.sleep(5)  
@@ -148,7 +152,7 @@ class Agent:
                     output = "Restarting system..."
                     self.reliable_send(output)
                     self.tcp_socket.close()
-                    restart_system()
+                    restart_system(command[1] , system= self.system)
                     return
                 
                 elif command[0] == 'cd' and len(command)>1:

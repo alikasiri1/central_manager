@@ -1,14 +1,14 @@
 import socket
 import threading
+import asyncio
 import time
 import json
 import logging
-from datetime import datetime
 import base64
 from GUI import *
 
 
-TCP_PORT = 5008
+TCP_PORT = 5010
 UDP_PORT = 50162
 BUFFER_SIZE = 1024
 LOG_FILE = "udp_alerts.log"
@@ -23,7 +23,6 @@ class Client:
         self.connection.settimeout(3)
         self.connection.connect((IP , PORT))
         self.commands = {}
-
 
 
 class Server:  
@@ -113,7 +112,7 @@ class Server:
         while True:
             try:
                 part = self.connection.recv(1024).decode('utf-8')
-                if not part:  # If the connection is lost, remove it
+                if not part: 
                     self.remove_connection(self.active_session_index)
                     return None
                 json_data += part
@@ -152,23 +151,25 @@ class Server:
                 print("[-] No active sessions available.")
 
 
-    def check_connections(self):
-        while True:
-            for agent in self.clients:
-                try:
-                    agent.connection.getpeername()
-                except:
-                    log = f"\n[-] connection to {agent.addresse} was lost\n>> "
-                    print(log)
+    # def check_connections(self):
+    #     while True:
+    #         print(self.clients)
+    #         for agent in self.clients:
+    #             try:
+    #                 agent.connection.getpeername()
+    #             except:
+    #                 log = f"\n[-] connection to {agent.addresse} was lost\n>> "
+    #                 print(log)
                     
-                    self.remove_connection(self.clients.index(agent))
+    #                 self.remove_connection(self.clients.index(agent))
         
-            time.sleep(10)
+    #         time.sleep(10)
+
 
     def handle_agent_commands(self):  
         
         while True:  
-            command = input('>> ')  
+            command = input('>> ') 
             command = command.split(" ")
             
             try:
@@ -188,7 +189,12 @@ class Server:
                     command = ["2"]
 
                 elif command[0] == "restart":
-                    command = ["3"]
+                    if command[1]:
+                        password = command[1]
+                        command = ["3" , password]
+                    else:
+                        print('try with password')
+                        continue
 
                 elif command[0] == 'upload':
                     file_content = self.read_file(command[1])
@@ -198,7 +204,7 @@ class Server:
 
                 result = self.execute_remotely(command)
                 
-                if result is None:  # Connection was lost, select a new session
+                if result is None:  
                     continue
                 
                 elif command[0] == 'close':
@@ -206,6 +212,10 @@ class Server:
                     self.connection.close()
                     self.remove_connection(self.active_session_index)
                     continue
+                elif command[0] == 'restart':
+                    print(result)
+                    self.connection.close()
+                    self.remove_connection(self.active_session_index)
 
                 if command[0] == 'download' and "[-] Error" not in result:
                     result = self.write_file(" ".join(command[1:]), result)
@@ -214,20 +224,23 @@ class Server:
                     result = '[+] ' + result
             except Exception as e:
                 result = f"[-] Error: {str(e)}"
+                if str(e)=='timed out':
+                    print(f"[-] connection to {self.clients[self.active_session_index].addresse} was lost")
+                    self.connection.close()
+                    self.remove_connection(self.active_session_index)   
 
             print(result)
 
     def start(self):
-        
         udp_connection_thread = threading.Thread(target=self.handle_udp_alerts).start()
         self.connect_to_clients(port=TCP_PORT)
         connection_thread = threading.Thread(target=self.handle_agent_commands).start()
-        check_connections = threading.Thread(target=self.check_connections).start()
+        # check_connections = threading.Thread(target=self.check_connections).start()
         
 
 
 def main():
-    server = Server('192.168.31.1' , UDP_PORT)
+    server = Server('192.168.1.108' , UDP_PORT)
     server.start()
     
     root = tk.Tk()
